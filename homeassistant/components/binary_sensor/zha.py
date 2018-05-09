@@ -32,22 +32,32 @@ async def async_setup_platform(hass, config, async_add_devices,
         return
 
     from zigpy.zcl.clusters.security import IasZone
+    from zigpy.zcl.clusters.general import OnOff
+    from zigpy.quirks.xiaomi import AqaraOpenCloseSensor
 
     in_clusters = discovery_info['in_clusters']
 
     device_class = None
-    cluster = in_clusters[IasZone.cluster_id]
-    if discovery_info['new_join']:
-        await cluster.bind()
-        ieee = cluster.endpoint.device.application.ieee
-        await cluster.write_attributes({'cie_addr': ieee})
+    if IasZone.cluster_id in in_clusters:
+        cluster = in_clusters[IasZone.cluster_id]
+        if discovery_info['new_join']:
+            await cluster.bind()
+            ieee = cluster.endpoint.device.application.ieee
+            await cluster.write_attributes({'cie_addr': ieee})
 
-    try:
-        zone_type = await cluster['zone_type']
-        device_class = CLASS_MAPPING.get(zone_type, None)
-    except Exception:  # pylint: disable=broad-except
-        # If we fail to read from the device, use a non-specific class
-        pass
+        try:
+            zone_type = await cluster['zone_type']
+            device_class = CLASS_MAPPING.get(zone_type, None)
+        except Exception:  # pylint: disable=broad-except
+            # If we fail to read from the device, use a non-specific class
+            pass
+    elif OnOff.cluster_id in in_clusters:
+        cluster = in_clusters[OnOff.cluster_id]
+        if discovery_info['new_join']:
+            await cluster.bind()
+        device = discovery_info['endpoint'].device
+        if isinstance(device, AqaraOpenCloseSensor):
+            device_class = 'opening'
 
     sensor = BinarySensor(device_class, **discovery_info)
     async_add_devices([sensor], update_before_add=True)
@@ -57,13 +67,15 @@ class BinarySensor(zha.Entity, BinarySensorDevice):
     """THe ZHA Binary Sensor."""
 
     _domain = DOMAIN
+    value_attribute = 0
 
     def __init__(self, device_class, **kwargs):
         """Initialize the ZHA binary sensor."""
         super().__init__(**kwargs)
         self._device_class = device_class
         from zigpy.zcl.clusters.security import IasZone
-        self._ias_zone_cluster = self._in_clusters[IasZone.cluster_id]
+        if IasZone.cluster_id in self._in_clusters:
+            self._ias_zone_cluster = self._in_clusters[IasZone.cluster_id]
 
     @property
     def should_poll(self) -> bool:
@@ -84,21 +96,35 @@ class BinarySensor(zha.Entity, BinarySensorDevice):
 
     def cluster_command(self, tsn, command_id, args):
         """Handle commands received to this cluster."""
-        if command_id == 0:
+        from zigpy.zcl.clusters.security import IasZone
+        if command_id == 0 and IasZone.cluster_id in self._in_clusters:
             self._state = args[0] & 3
             _LOGGER.debug("Updated alarm state: %s", self._state)
             self.async_schedule_update_ha_state()
-        elif command_id == 1:
+        elif command_id == 1 and IasZone.cluster_id in self._in_clusters:
             _LOGGER.debug("Enroll requested")
             res = self._ias_zone_cluster.enroll_response(0, 0)
             self.hass.async_add_job(res)
 
+    def attribute_updated(self, attribute, value):
+        """Handle attribute update from device."""
+        _LOGGER.debug("Attribute updated: %s %s %s", self, attribute, value)
+        if attribute == self.value_attribute:
+            self._state = bool(value)
+            self.schedule_update_ha_state()
+
     async def async_update(self):
         """Retrieve latest state."""
         from bellows.types.basic import uint16_t
-
-        result = await zha.safe_read(self._endpoint.ias_zone,
-                                     ['zone_status'])
-        state = result.get('zone_status', self._state)
-        if isinstance(state, (int, uint16_t)):
-            self._state = result.get('zone_status', self._state) & 3
+        from zigpy.zcl.clusters.security import IasZone
+        if IasZone.cluster_id in self._in_clusters:
+            result = await zha.safe_read(self._endpoint.ias_zone,
+                                         ['zone_status'])
+            state = result.get('zone_status', self._state)
+            if isinstance(state, (int, uint16_t)):
+                self._state = result.get('zone_status', self._state) & 3
+        else:
+            result = await zha.safe_read(
+                list(self._in_clusters.values())[0],
+                [self.value_attribute])
+            self._state = result.get(self.value_attribute, self._state)

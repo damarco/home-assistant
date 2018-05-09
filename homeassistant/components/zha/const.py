@@ -2,6 +2,7 @@
 
 DEVICE_CLASS = {}
 SINGLE_CLUSTER_DEVICE_CLASS = {}
+SMARTTHINGS_SINGLE_CLUSTER_DEVICE_CLASS = {}
 COMPONENT_CLUSTERS = {}
 
 
@@ -13,6 +14,7 @@ def populate_data():
     """
     from zigpy import zcl
     from zigpy.profiles import PROFILES, zha, zll
+    from zigpy.quirks import smartthings
 
     DEVICE_CLASS[zha.PROFILE_ID] = {
         zha.DeviceType.SMART_PLUG: 'switch',
@@ -35,8 +37,13 @@ def populate_data():
         zcl.clusters.general.OnOff: 'switch',
         zcl.clusters.measurement.RelativeHumidity: 'sensor',
         zcl.clusters.measurement.TemperatureMeasurement: 'sensor',
+        zcl.clusters.measurement.PressureMeasurement: 'sensor',
         zcl.clusters.security.IasZone: 'binary_sensor',
         zcl.clusters.hvac.Fan: 'fan',
+    })
+
+    SMARTTHINGS_SINGLE_CLUSTER_DEVICE_CLASS.update({
+        smartthings.SmartthingsRelativeHumidityCluster: 'sensor',
     })
 
     # A map of hass components to all Zigbee clusters it could use

@@ -7,6 +7,7 @@ https://home-assistant.io/components/zha/
 import collections
 import enum
 import logging
+import datetime
 
 import voluptuous as vol
 
@@ -14,6 +15,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant import const as ha_const
 from homeassistant.helpers import discovery, entity
 from homeassistant.util import slugify
+from homeassistant.helpers.entity_component import EntityComponent
 
 REQUIREMENTS = [
     'bellows==0.5.1',
@@ -86,6 +88,8 @@ async def async_setup(hass, config):
     """
     global APPLICATION_CONTROLLER
 
+    component = EntityComponent(_LOGGER, DOMAIN, hass)
+
     usb_path = config[DOMAIN].get(CONF_USB_PATH)
     baudrate = config[DOMAIN].get(CONF_BAUDRATE)
     radio_type = config[DOMAIN].get(CONF_RADIO_TYPE)
@@ -102,7 +106,7 @@ async def async_setup(hass, config):
 
     database = config[DOMAIN].get(CONF_DATABASE)
     APPLICATION_CONTROLLER = ControllerApplication(radio, database)
-    listener = ApplicationListener(hass, config)
+    listener = ApplicationListener(hass, config, component)
     APPLICATION_CONTROLLER.add_listener(listener)
     await APPLICATION_CONTROLLER.startup(auto_form=True)
 
@@ -135,10 +139,11 @@ async def async_setup(hass, config):
 class ApplicationListener:
     """All handlers for events that happen on the ZigBee application."""
 
-    def __init__(self, hass, config):
+    def __init__(self, hass, config, component):
         """Initialize the listener."""
         self._hass = hass
         self._config = config
+        self._component = component
         self._device_registry = collections.defaultdict(list)
         hass.data[DISCOVERY_KEY] = hass.data.get(DISCOVERY_KEY, {})
 
@@ -167,7 +172,11 @@ class ApplicationListener:
     async def async_device_initialized(self, device, join):
         """Handle device joined and basic information discovered (async)."""
         import zigpy.profiles
+        from zigpy import zcl
         import homeassistant.components.zha.const as zha_const
+        from zigpy.quirks.smartthings import (SmartthingsDevice,
+                                              SmartthingsArrivalSensor)
+        from zigpy.quirks.xiaomi import AqaraOpenCloseSensor
         zha_const.populate_data()
 
         for endpoint_id, endpoint in device.endpoints.items():
@@ -225,10 +234,29 @@ class ApplicationListener:
                 cluster_type = type(cluster)
                 if cluster_id in profile_clusters[0]:
                     continue
-                if cluster_type not in zha_const.SINGLE_CLUSTER_DEVICE_CLASS:
+
+                if (isinstance(device, SmartthingsDevice) and
+                        cluster_type in
+                        zha_const.SMARTTHINGS_SINGLE_CLUSTER_DEVICE_CLASS):
+                    component = \
+                        zha_const.SMARTTHINGS_SINGLE_CLUSTER_DEVICE_CLASS[
+                            cluster_type
+                        ]
+                elif isinstance(device, SmartthingsArrivalSensor):
+                    component = 'device_tracker'
+                    discovered_info['manufacturer'] = 'SmartThings'
+                    discovered_info['model'] = 'Arrival'
+                elif cluster_type in zha_const.SINGLE_CLUSTER_DEVICE_CLASS:
+                    component = zha_const.SINGLE_CLUSTER_DEVICE_CLASS[
+                            cluster_type
+                        ]
+                else:
                     continue
 
-                component = zha_const.SINGLE_CLUSTER_DEVICE_CLASS[cluster_type]
+                if cluster_type == zcl.clusters.general.OnOff and \
+                        isinstance(device, AqaraOpenCloseSensor):
+                    component = 'binary_sensor'
+
                 cluster_key = "{}-{}".format(device_key, cluster_id)
                 discovery_info = {
                     'application_listener': self,
@@ -249,6 +277,17 @@ class ApplicationListener:
                     {'discovery_key': cluster_key},
                     self._config,
                 )
+
+            node_key = "zha-{}".format(device.ieee)
+            node_entity = ZhaNodeEntity(
+                endpoint,
+                discovered_info['manufacturer'],
+                discovered_info['model'],
+                self,
+                node_key,
+                join,
+            )
+            await self._component.async_add_entities([node_entity])
 
     def register_entity(self, ieee, entity_obj):
         """Record the creation of a hass entity associated with ieee."""
@@ -316,6 +355,111 @@ class Entity(entity.Entity):
     def zdo_command(self, tsn, command_id, args):
         """Handle a ZDO command received on this cluster."""
         pass
+
+
+class ZhaNodeEntity(entity.Entity):
+    """A base class for ZHA nodes."""
+
+    _domain = DOMAIN
+    _keepalive_interval = 7200  # 2 hours
+    _has_battery = False
+
+    def __init__(self, endpoint, manufacturer, model, application_listener,
+                 unique_id, new_join, **kwargs):
+        """Init ZHA node entity."""
+        from zigpy.quirks.smartthings import SmartthingsDevice
+        from zigpy.quirks.xiaomi import XiaomiDevice
+
+        self._device_state_attributes = {}
+        ieee = endpoint.device.ieee
+        ieeetail = ''.join(['%02x' % (o, ) for o in ieee[-4:]])
+        if manufacturer and model is not None:
+            self.entity_id = "{}.{}_{}_{}".format(
+                self._domain,
+                slugify(manufacturer),
+                slugify(model),
+                ieeetail,
+            )
+            self._device_state_attributes['friendly_name'] = "{} {}".format(
+                manufacturer,
+                model,
+            )
+        else:
+            self.entity_id = "{}.zha_{}".format(
+                self._domain,
+                ieeetail,
+            )
+
+        if (isinstance(endpoint.device, SmartthingsDevice) or
+                isinstance(endpoint.device, XiaomiDevice)):
+            self._has_battery = True
+            endpoint.device.setup_battery_monitoring(new_join)
+
+        self._device_state_attributes['ieee'] = '%s' % (endpoint.device.ieee)
+        self._device_state_attributes['last_update'] = ha_const.STATE_UNKNOWN
+        self._device_state_attributes['lqi'] = endpoint.device.lqi
+        self._device_state_attributes['rssi'] = endpoint.device.rssi
+
+        if self._has_battery:
+            self._device_state_attributes['battery'] = ha_const.STATE_UNKNOWN
+            self._device_state_attributes['battery_voltage'] = \
+                ha_const.STATE_UNKNOWN
+
+        self._endpoint = endpoint
+        self._state = 'Offline'
+        self._unique_id = unique_id
+
+        application_listener.register_entity(ieee, self)
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return self._unique_id
+
+    @property
+    def state(self) -> str:
+        """Return the state of the entity."""
+        return self._state
+
+    @property
+    def hidden(self) -> bool:
+        """Hide by default."""
+        return True
+
+    @property
+    def device_state_attributes(self):
+        """Return device specific state attributes."""
+
+        if self._has_battery:
+            self._device_state_attributes['battery'] = '%s%%' % (
+                self._endpoint.device.battery_percent)
+            self._device_state_attributes['battery_voltage'] = '%s mV' % (
+                self._endpoint.device.battery_voltage)
+        self._device_state_attributes['last_update'] = \
+            self._endpoint.device.last_seen
+        self._device_state_attributes['lqi'] = self._endpoint.device.lqi
+        self._device_state_attributes['rssi'] = self._endpoint.device.rssi
+        return self._device_state_attributes
+
+    async def async_update(self):
+        """Handle polling."""
+        if self._endpoint.device.last_seen is ha_const.STATE_UNKNOWN:
+            self._state = 'Offline'
+        else:
+            difference = datetime.datetime.now() - \
+                self._endpoint.device.last_seen
+            if difference.total_seconds() > self._keepalive_interval:
+                self._state = 'Offline'
+            elif self._has_battery:
+                if (self._endpoint.device.battery_percent is not
+                        ha_const.STATE_UNKNOWN and
+                        int(self._endpoint.device.battery_percent) <= 20):
+                    self._state = "Battery Low"
+                else:
+                    self._state = 'Online'
+            else:
+                self._state = 'Online'
+        self.schedule_update_ha_state()
 
 
 async def _discover_endpoint_info(endpoint):

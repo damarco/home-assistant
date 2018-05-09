@@ -25,20 +25,30 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
         return
 
     sensor = yield from make_sensor(discovery_info)
-    async_add_devices([sensor])
+    async_add_devices([sensor], update_before_add=True)
 
 
 @asyncio.coroutine
 def make_sensor(discovery_info):
     """Create ZHA sensors factory."""
     from zigpy.zcl.clusters.measurement import (
-        RelativeHumidity, TemperatureMeasurement
+        RelativeHumidity, TemperatureMeasurement, PressureMeasurement
+    )
+    from zigpy.quirks.smartthings import (
+        SmartthingsTemperatureHumiditySensor,
+        SmartthingsRelativeHumidityCluster
     )
     in_clusters = discovery_info['in_clusters']
-    if RelativeHumidity.cluster_id in in_clusters:
+    device = discovery_info['endpoint'].device
+    if (isinstance(device, SmartthingsTemperatureHumiditySensor) and
+            SmartthingsRelativeHumidityCluster.cluster_id in in_clusters):
+        sensor = RelativeHumiditySensor(**discovery_info)
+    elif RelativeHumidity.cluster_id in in_clusters:
         sensor = RelativeHumiditySensor(**discovery_info)
     elif TemperatureMeasurement.cluster_id in in_clusters:
         sensor = TemperatureSensor(**discovery_info)
+    elif PressureMeasurement.cluster_id in in_clusters:
+        sensor = PressureSensor(**discovery_info)
     else:
         sensor = Sensor(**discovery_info)
 
@@ -46,7 +56,7 @@ def make_sensor(discovery_info):
         cluster = list(in_clusters.values())[0]
         yield from cluster.bind()
         yield from cluster.configure_reporting(
-            sensor.value_attribute, 300, 600, sensor.min_reportable_change,
+            sensor.value_attribute, 10, 600, sensor.min_reportable_change,
         )
 
     return sensor
@@ -58,6 +68,11 @@ class Sensor(zha.Entity):
     _domain = DOMAIN
     value_attribute = 0
     min_reportable_change = 1
+
+    @property
+    def should_poll(self) -> bool:
+        """State gets pushed from device."""
+        return False
 
     @property
     def state(self) -> str:
@@ -72,6 +87,14 @@ class Sensor(zha.Entity):
         if attribute == self.value_attribute:
             self._state = value
             self.schedule_update_ha_state()
+
+    @asyncio.coroutine
+    def async_update(self):
+        """Handle polling."""
+        result = yield from zha.safe_read(
+            list(self._in_clusters.values())[0],
+            [self.value_attribute])
+        self._state = result.get(self.value_attribute, self._state)
 
 
 class TemperatureSensor(Sensor):
@@ -111,3 +134,19 @@ class RelativeHumiditySensor(Sensor):
             return 'unknown'
 
         return round(float(self._state) / 100, 1)
+
+
+class PressureSensor(Sensor):
+    """ZHA pressure sensor."""
+
+    @property
+    def unit_of_measurement(self):
+        """Return the unit of measurement of this entity."""
+        return 'hPa'
+
+    @property
+    def state(self):
+        """Return the state of the entity."""
+        if self._state == 'unknown':
+            return 'unknown'
+        return round(float(self._state))
