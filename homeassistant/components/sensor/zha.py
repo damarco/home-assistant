@@ -19,12 +19,19 @@ DEPENDENCIES = ['zha']
 async def async_setup_platform(hass, config, async_add_entities,
                                discovery_info=None):
     """Set up Zigbee Home Automation sensors."""
-    discovery_info = zha.get_discovery_info(hass, discovery_info)
+    pass
+
+
+async def async_setup_entry(hass, config_entry, async_add_entities):
+    """Set up the Zigbee Home Automation sensors from config entry."""
+    discovery_info = hass.data.get(zha.DISCOVERY_KEY, {})
     if discovery_info is None:
         return
 
-    sensor = await make_sensor(discovery_info)
-    async_add_entities([sensor], update_before_add=True)
+    entities = []
+    for device in discovery_info['sensor'].values():
+        entities.append(await make_sensor(device))
+    async_add_entities(entities, update_before_add=True)
 
 
 async def make_sensor(discovery_info):
