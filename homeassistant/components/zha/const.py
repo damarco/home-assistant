@@ -1,4 +1,30 @@
 """All constants related to the ZHA component."""
+import enum
+
+DOMAIN = 'zha'
+
+COMPONENTS = [
+    'binary_sensor',
+    'fan',
+    'light',
+    'sensor',
+    'switch',
+]
+
+CONF_BAUDRATE = 'baudrate'
+CONF_DATABASE = 'database_path'
+CONF_DEVICE_CONFIG = 'device_config'
+CONF_RADIO_TYPE = 'radio_type'
+CONF_USB_PATH = 'usb_path'
+DATA_DEVICE_CONFIG = 'zha_device_config'
+
+
+class RadioType(enum.Enum):
+    """Possible options for radio type."""
+
+    ezsp = 'ezsp'
+    xbee = 'xbee'
+
 
 DEVICE_CLASS = {}
 SINGLE_INPUT_CLUSTER_DEVICE_CLASS = {}
