@@ -147,6 +147,7 @@ FLOWS = [
     'openuv',
     'sonos',
     'tradfri',
+    'zha',
     'zone',
     'upnp',
 ]
