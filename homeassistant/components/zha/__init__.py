@@ -62,6 +62,7 @@ SERVICE_PERMIT = 'permit'
 SERVICE_REMOVE = 'remove'
 SERVICE_SCHEMAS = {
     SERVICE_PERMIT: vol.Schema({
+        vol.Optional(ATTR_IEEE): cv.string,
         vol.Optional(ATTR_DURATION, default=60):
             vol.All(vol.Coerce(int), vol.Range(1, 254)),
     }),
@@ -114,9 +115,16 @@ async def async_setup(hass, config):
 
     async def permit(service):
         """Allow devices to join this network."""
+        from bellows.types import EmberEUI64, uint8_t
         duration = service.data.get(ATTR_DURATION)
-        _LOGGER.info("Permitting joins for %ss", duration)
-        await APPLICATION_CONTROLLER.permit(duration)
+        ieee = service.data.get(ATTR_IEEE)
+        if ieee is not None:
+            ieee = EmberEUI64([uint8_t(p, base=16) for p in ieee.split(':')])
+            _LOGGER.info("Permitting joins for %ss on node %s", duration, ieee)
+            await APPLICATION_CONTROLLER.permit_targeted(ieee, duration)
+        else:
+            _LOGGER.info("Permitting joins for %ss", duration)
+            await APPLICATION_CONTROLLER.permit(duration)
 
     hass.services.async_register(DOMAIN, SERVICE_PERMIT, permit,
                                  schema=SERVICE_SCHEMAS[SERVICE_PERMIT])

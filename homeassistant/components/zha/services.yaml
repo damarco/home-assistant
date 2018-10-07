@@ -3,6 +3,9 @@
 permit:
   description: Allow nodes to join the ZigBee network.
   fields:
+    ieee_address:
+      description: IEEE address of the node to permit joins
+      example: "00:0d:6f:00:05:7d:2d:34"
     duration:
       description: Time to permit joins, in seconds
       example: 60
