@@ -232,8 +232,11 @@ class ApplicationListener:
             component = None
             profile_clusters = ([], [])
             device_key = "{}-{}".format(device.ieee, endpoint_id)
-            node_config = self._config_entry[DOMAIN][CONF_DEVICE_CONFIG].get(
-                device_key, {})
+            node_config = {}
+            if CONF_DEVICE_CONFIG in self._config_entry.data:
+                node_config = self._config_entry.data[CONF_DEVICE_CONFIG].get(
+                    device_key, {}
+                )
 
             if endpoint.profile_id in zigpy.profiles.PROFILES:
                 profile = zigpy.profiles.PROFILES[endpoint.profile_id]
