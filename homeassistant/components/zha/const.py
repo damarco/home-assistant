@@ -3,6 +3,10 @@ import enum
 
 DOMAIN = 'zha'
 
+BAUD_RATES = [
+    2400, 4800, 9600, 14400, 19200, 38400, 57600, 115200, 128000, 256000
+]
+
 COMPONENTS = [
     'binary_sensor',
     'fan',
@@ -24,6 +28,10 @@ class RadioType(enum.Enum):
 
     ezsp = 'ezsp'
     xbee = 'xbee'
+
+    @classmethod
+    def list(cls):
+        return list(map(lambda r: r.value, cls))
 
 
 DEVICE_CLASS = {}
