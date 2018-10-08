@@ -109,7 +109,7 @@ async def async_setup_entry(hass, config_entry):
 
     database = config_entry.data.get(CONF_DATABASE)
     APPLICATION_CONTROLLER = ControllerApplication(radio, database)
-    listener = ApplicationListener(hass, config_entry.data)
+    listener = ApplicationListener(hass, config_entry)
     APPLICATION_CONTROLLER.add_listener(listener)
     await APPLICATION_CONTROLLER.startup(auto_form=True)
 
