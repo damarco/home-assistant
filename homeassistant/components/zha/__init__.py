@@ -11,7 +11,7 @@ import time
 import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
-from homeassistant import config_entries
+from homeassistant import config_entries, const as ha_const
 from homeassistant.helpers import entity
 from homeassistant.util import slugify
 from homeassistant.helpers.entity_component import EntityComponent
@@ -21,7 +21,7 @@ from homeassistant.helpers.device_registry import CONNECTION_ZIGBEE
 from . import config_flow  # noqa  # pylint: disable=unused-import
 from .const import (
     DOMAIN, COMPONENTS, CONF_BAUDRATE, CONF_DATABASE, CONF_RADIO_TYPE,
-    CONF_USB_PATH, RadioType
+    CONF_USB_PATH, CONF_DEVICE_CONFIG, RadioType
 )
 
 REQUIREMENTS = [
@@ -30,12 +30,18 @@ REQUIREMENTS = [
     'zigpy-xbee==0.1.1',
 ]
 
+DEVICE_CONFIG_SCHEMA_ENTRY = vol.Schema({
+    vol.Optional(ha_const.CONF_TYPE): cv.string,
+})
+
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Optional(CONF_RADIO_TYPE, default='ezsp'): cv.enum(RadioType),
         CONF_USB_PATH: cv.string,
         vol.Optional(CONF_BAUDRATE, default=57600): cv.positive_int,
         CONF_DATABASE: cv.string,
+        vol.Optional(CONF_DEVICE_CONFIG, default={}):
+            vol.Schema({cv.string: DEVICE_CONFIG_SCHEMA_ENTRY}),
     })
 }, extra=vol.ALLOW_EXTRA)
 
@@ -228,6 +234,11 @@ class ApplicationListener:
             component = None
             profile_clusters = ([], [])
             device_key = "{}-{}".format(device.ieee, endpoint_id)
+            node_config = {}
+            if CONF_DEVICE_CONFIG in self._config_entry.data:
+                node_config = self._config_entry.data[CONF_DEVICE_CONFIG].get(
+                    device_key, {}
+                )
 
             if endpoint.profile_id in zigpy.profiles.PROFILES:
                 profile = zigpy.profiles.PROFILES[endpoint.profile_id]
@@ -237,6 +248,10 @@ class ApplicationListener:
                     profile_clusters = profile.CLUSTERS[endpoint.device_type]
                     profile_info = zha_const.DEVICE_CLASS[endpoint.profile_id]
                     component = profile_info[endpoint.device_type]
+
+            if ha_const.CONF_TYPE in node_config:
+                component = node_config[ha_const.CONF_TYPE]
+                profile_clusters = zha_const.COMPONENT_CLUSTERS[component]
 
             if component:
                 in_clusters = [endpoint.in_clusters[c]
