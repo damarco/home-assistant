@@ -7,6 +7,8 @@ at https://home-assistant.io/components/sensor.zha/
 import logging
 
 from homeassistant.components.sensor import DOMAIN
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.components.zha.const import ZHA_DISCOVERY_NEW
 from homeassistant.components import zha
 from homeassistant.const import TEMP_CELSIUS
 from homeassistant.util.temperature import convert as convert_temperature
@@ -23,15 +25,24 @@ async def async_setup_platform(hass, config, async_add_entities,
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    """Set up the Zigbee Home Automation sensors from config entry."""
-    discovery_info = hass.data.get(zha.DISCOVERY_KEY, {})
+    """Set up the Zigbee Home Automation sensor from config entry."""
+    async def async_discover(discovery_info):
+        await _async_setup_entity(hass, config_entry, async_add_entities,
+                                  discovery_info)
+
+    async_dispatcher_connect(
+        hass, ZHA_DISCOVERY_NEW.format(DOMAIN), async_discover)
+
+
+async def _async_setup_entity(hass, config_entry, async_add_entities,
+                              discovery_info=None):
+    """Set up the ZHA sensor."""
+    discovery_info = zha.get_discovery_info(hass, discovery_info)
     if discovery_info is None:
         return
 
-    entities = []
-    for device in discovery_info['sensor'].values():
-        entities.append(await make_sensor(device))
-    async_add_entities(entities, update_before_add=True)
+    async_add_entities([await make_sensor(discovery_info)],
+                       update_before_add=True)
 
 
 async def make_sensor(discovery_info):

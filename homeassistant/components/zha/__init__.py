@@ -16,12 +16,13 @@ from homeassistant.helpers import entity
 from homeassistant.util import slugify
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.device_registry import CONNECTION_ZIGBEE
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 # Loading the config flow file will register the flow
 from . import config_flow  # noqa  # pylint: disable=unused-import
 from .const import (
     DOMAIN, COMPONENTS, CONF_BAUDRATE, CONF_DATABASE, CONF_RADIO_TYPE,
-    CONF_USB_PATH, CONF_DEVICE_CONFIG, RadioType
+    CONF_USB_PATH, CONF_DEVICE_CONFIG, ZHA_DISCOVERY_NEW, RadioType
 )
 
 REQUIREMENTS = [
@@ -91,6 +92,12 @@ async def async_setup_entry(hass, config_entry):
     """
     global APPLICATION_CONTROLLER
 
+    for component in COMPONENTS:
+        hass.async_create_task(
+            hass.config_entries.async_forward_entry_setup(
+                config_entry, component)
+        )
+
     usb_path = config_entry.data.get(CONF_USB_PATH)
     baudrate = config_entry.data.get(CONF_BAUDRATE)
     radio_type = config_entry.data.get(CONF_RADIO_TYPE)
@@ -111,16 +118,8 @@ async def async_setup_entry(hass, config_entry):
     APPLICATION_CONTROLLER = ControllerApplication(radio, database)
     listener = ApplicationListener(hass, config_entry)
     APPLICATION_CONTROLLER.add_listener(listener)
-    await APPLICATION_CONTROLLER.startup(auto_form=True)
 
-    for device in APPLICATION_CONTROLLER.devices.values():
-        hass.async_add_job(listener.async_device_initialized(device, False))
-
-    for component in COMPONENTS:
-        hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(
-                config_entry, component)
-        )
+    hass.async_add_job(_startup(hass, APPLICATION_CONTROLLER, listener))
 
     device_registry = await \
         hass.helpers.device_registry.async_get_registry()
@@ -157,6 +156,13 @@ async def async_setup_entry(hass, config_entry):
     return True
 
 
+async def _startup(hass, controller, listener):
+    await controller.startup(auto_form=True)
+
+    for device in controller.devices.values():
+        hass.async_add_job(listener.async_device_initialized(device, False))
+
+
 async def async_unload_entry(hass, config_entry):
     """Unload ZHA config entry."""
     del hass.data[DISCOVERY_KEY]
@@ -180,10 +186,6 @@ class ApplicationListener:
         self._component = EntityComponent(_LOGGER, DOMAIN, hass)
         self._device_registry = collections.defaultdict(list)
         hass.data[DISCOVERY_KEY] = hass.data.get(DISCOVERY_KEY, {})
-        for component in COMPONENTS:
-            hass.data[DISCOVERY_KEY][component] = (
-                hass.data[DISCOVERY_KEY].get(component, {})
-            )
 
     def device_joined(self, device):
         """Handle device joined.
@@ -268,8 +270,10 @@ class ApplicationListener:
                     'new_join': join,
                     'unique_id': device_key,
                 }
-                self._hass.data[DISCOVERY_KEY][component][device_key] = (
-                    discovery_info
+                self._hass.data[DISCOVERY_KEY][device_key] = (discovery_info)
+
+                async_dispatcher_send(
+                    self._hass, ZHA_DISCOVERY_NEW.format(component), device_key
                 )
 
             for cluster in endpoint.in_clusters.values():
@@ -336,7 +340,11 @@ class ApplicationListener:
             'entity_suffix': '_{}'.format(cluster.cluster_id),
         }
         discovery_info[discovery_attr] = {cluster.cluster_id: cluster}
-        self._hass.data[DISCOVERY_KEY][component][cluster_key] = discovery_info
+        self._hass.data[DISCOVERY_KEY][cluster_key] = discovery_info
+
+        async_dispatcher_send(
+            self._hass, ZHA_DISCOVERY_NEW.format(component), cluster_key
+        )
 
 
 class Entity(entity.Entity):
@@ -501,6 +509,22 @@ class ZhaDeviceEntity(entity.Entity):
                 self._state = 'offline'
             else:
                 self._state = 'online'
+
+
+def get_discovery_info(hass, discovery_info):
+    """Get the full discovery info for a device.
+
+    Some of the info that needs to be passed to platforms is not JSON
+    serializable, so it cannot be put in the discovery_info dictionary. This
+    component places that info we need to pass to the platform in hass.data,
+    and this function is a helper for platforms to retrieve the complete
+    discovery info.
+    """
+    if discovery_info is None:
+        return
+
+    all_discovery_info = hass.data.get(DISCOVERY_KEY, {})
+    return all_discovery_info.get(discovery_info, None)
 
 
 async def safe_read(cluster, attributes, allow_cache=True, only_cache=False):
