@@ -6,11 +6,12 @@ at https://home-assistant.io/components/sensor.zha/
 """
 import logging
 
-from homeassistant.components.sensor import DOMAIN
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.components.zha.const import ZHA_DISCOVERY_NEW
 from homeassistant.components import zha
+from homeassistant.components.sensor import DOMAIN
+from homeassistant.components.zha.const import (
+    DATA_ZHA, DATA_ZHA_DISPATCHERS, ZHA_DISCOVERY_NEW)
 from homeassistant.const import TEMP_CELSIUS
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util.temperature import convert as convert_temperature
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,8 +31,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         await _async_setup_entity(hass, config_entry, async_add_entities,
                                   discovery_info)
 
-    async_dispatcher_connect(
+    unsub = async_dispatcher_connect(
         hass, ZHA_DISCOVERY_NEW.format(DOMAIN), async_discover)
+    hass.data[DATA_ZHA][DATA_ZHA_DISPATCHERS].append(unsub)
 
 
 async def _async_setup_entity(hass, config_entry, async_add_entities,

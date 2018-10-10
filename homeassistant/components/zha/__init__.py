@@ -22,7 +22,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from . import config_flow  # noqa  # pylint: disable=unused-import
 from .const import (
     DOMAIN, COMPONENTS, CONF_BAUDRATE, CONF_DATABASE, CONF_RADIO_TYPE,
-    CONF_USB_PATH, CONF_DEVICE_CONFIG, ZHA_DISCOVERY_NEW, RadioType
+    CONF_USB_PATH, CONF_DEVICE_CONFIG, DATA_ZHA, DATA_ZHA_DISPATCHERS,
+    ZHA_DISCOVERY_NEW, RadioType
 )
 
 REQUIREMENTS = [
@@ -91,6 +92,9 @@ async def async_setup_entry(hass, config_entry):
     Will automatically load components to support devices found on the network.
     """
     global APPLICATION_CONTROLLER
+
+    hass.data[DATA_ZHA] = hass.data.get(DATA_ZHA, {})
+    hass.data[DATA_ZHA][DATA_ZHA_DISPATCHERS] = []
 
     for component in COMPONENTS:
         hass.async_create_task(
@@ -172,6 +176,11 @@ async def async_unload_entry(hass, config_entry):
     for component in COMPONENTS:
         await hass.config_entries.async_forward_entry_unload(
             config_entry, component)
+
+    dispatchers = hass.data[DATA_ZHA].get(DATA_ZHA_DISPATCHERS, [])
+    for unsub_dispatcher in dispatchers:
+        unsub_dispatcher()
+    del hass.data[DATA_ZHA]
 
     return True
 
