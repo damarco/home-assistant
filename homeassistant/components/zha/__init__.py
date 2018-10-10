@@ -10,21 +10,20 @@ import time
 
 import voluptuous as vol
 
-import homeassistant.helpers.config_validation as cv
 from homeassistant import config_entries, const as ha_const
 from homeassistant.helpers import entity
-from homeassistant.util import slugify
-from homeassistant.helpers.entity_component import EntityComponent
+import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.device_registry import CONNECTION_ZIGBEE
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.util import slugify
 
 # Loading the config flow file will register the flow
 from . import config_flow  # noqa  # pylint: disable=unused-import
 from .const import (
-    DOMAIN, COMPONENTS, CONF_BAUDRATE, CONF_DATABASE, CONF_RADIO_TYPE,
-    CONF_USB_PATH, CONF_DEVICE_CONFIG, DATA_ZHA, DATA_ZHA_DISPATCHERS,
-    ZHA_DISCOVERY_NEW, RadioType
-)
+    COMPONENTS, CONF_BAUDRATE, CONF_DATABASE, CONF_DEVICE_CONFIG,
+    CONF_RADIO_TYPE, CONF_USB_PATH, DATA_ZHA, DATA_ZHA_DISPATCHERS,
+    DATA_ZHA_RADIO, DOMAIN, ZHA_DISCOVERY_NEW, RadioType)
 
 REQUIREMENTS = [
     'bellows==0.7.0',
@@ -117,6 +116,7 @@ async def async_setup_entry(hass, config_entry):
         radio_description = "XBee"
 
     await radio.connect(usb_path, baudrate)
+    hass.data[DATA_ZHA][DATA_ZHA_RADIO] = radio
 
     database = config_entry.data.get(CONF_DATABASE)
     APPLICATION_CONTROLLER = ControllerApplication(radio, database)
@@ -180,6 +180,9 @@ async def async_unload_entry(hass, config_entry):
     dispatchers = hass.data[DATA_ZHA].get(DATA_ZHA_DISPATCHERS, [])
     for unsub_dispatcher in dispatchers:
         unsub_dispatcher()
+
+    _LOGGER.debug("Closing zha radio")
+    hass.data[DATA_ZHA][DATA_ZHA_RADIO].close()
     del hass.data[DATA_ZHA]
 
     return True

@@ -25,6 +25,7 @@ CONF_USB_PATH = 'usb_path'
 DATA_DEVICE_CONFIG = 'zha_device_config'
 DATA_ZHA = 'zha'
 DATA_ZHA_DISPATCHERS = 'zha_dispatchers'
+DATA_ZHA_RADIO = 'zha_radio'
 
 
 class RadioType(enum.Enum):
