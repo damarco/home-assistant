@@ -37,6 +37,7 @@ SERVICE_SCHEMAS = {
     SERVICE_PERMIT: vol.Schema({
         vol.Optional(ATTR_DURATION, default=60):
             vol.All(vol.Coerce(int), vol.Range(1, 254)),
+        vol.Optional(ATTR_IEEE_ADDRESS): cv.string,
     }),
     IEEE_SERVICE: vol.Schema({
         vol.Required(ATTR_IEEE_ADDRESS): cv.string,
@@ -116,8 +117,9 @@ def async_load_api(hass, application_controller, zha_gateway):
     async def permit(service):
         """Allow devices to join this network."""
         duration = service.data.get(ATTR_DURATION)
+        ieee = service.data.get(ATTR_IEEE_ADDRESS)
         _LOGGER.info("Permitting joins for %ss", duration)
-        await application_controller.permit(duration)
+        await application_controller.permit(duration, ieee)
 
     hass.services.async_register(DOMAIN, SERVICE_PERMIT, permit,
                                  schema=SERVICE_SCHEMAS[SERVICE_PERMIT])
